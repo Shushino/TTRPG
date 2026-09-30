@@ -2,14 +2,16 @@
 
 A web app where a tabletop RPG group creates a campaign space, keeps character sheets synced, rolls dice, and chats — everything updates live for everyone at the (virtual) table.
 
-> **Status:** Phase 1 output (planning only — no app code exists yet). Nothing gets built until George says "approved". Assumptions marked ⚠️ need his confirmation (see `USER_TODO.md` Q1–Q4, decisions D1–D4).
+> **Status:** Phase 1 output (planning only — no app code exists yet). Nothing gets built until George gives the go-ahead. His 2026-09-30 review answers are folded in; the ruleset question (Q1) stays **deliberately open** while he researches the genre (~6 months, see §1). Decision statuses live in `USER_TODO.md`.
 
 ---
 
 ## 1. What we're building (MVP scope)
 
 ### Game concept ⚠️
-- **System:** D&D 5e-*lite* — the popular core only: six ability scores with computed modifiers, HP, AC, proficiency bonus, skills, attacks, and a simple spell list. Concretely 5e-shaped, but the sheet's fields live in **one template file** (`characterTemplate`), so switching systems later is a template change, not a rewrite. We are **not** building a system-agnostic engine (agreed trap for v1).
+- **System (working placeholder — final choice deliberately deferred):** D&D 5e-*lite* — the popular core only: six ability scores with computed modifiers, HP, AC, proficiency bonus, skills, attacks, and a simple spell list. Concretely 5e-shaped, but the sheet's fields live in **one template file** (`characterTemplate`), so switching systems later is a template change, not a rewrite. We are **not** building a system-agnostic engine (agreed trap for v1).
+- **Ruleset status (George, 2026-09-30):** 5e-lite is a placeholder, not the decision — he hasn't researched TTRPGs yet and will, with his coursemates, over **~6 months (decision target ≈ March 2027)**. The build order is shaped so this is cheap: **M0–M2 (scaffold, auth, campaigns) are ruleset-independent**; M3+ consume the template file, so the decision only has to land before M3.
+- **Session shape (confirmed by George, Q2):** the GM creates the campaign, picks the ruleset and the setting, and shares it; players join, fill in their sheets, and get into character for the story. The campaign doc therefore carries a `setting` string (plain text in v1) for the GM's pitch: world, tone, house rules.
 - **Tone:** friendly utility. Dark theme, big touch targets — this gets used on phones at a physical table.
 - **Session flow:** GM creates a campaign → shares a 6-character join code → players join → everyone keeps their sheet synced live → anyone rolls dice and the result lands in the shared roll log → chat for table talk.
 
@@ -108,7 +110,8 @@ users/{uid}
 
 campaigns/{campaignId}
   name: string
-  system: "5e-lite"
+  system: "5e-lite"                 // ruleset placeholder until the group's Q1 decision
+  setting: string                   // GM's shared pitch: world, tone, house rules (plain text v1)
   gmUid: string                     // creator
   memberUids: string[]              // GM included; used directly by security rules
   joinCode: string                  // 6 chars, unambiguous alphabet (no 0/O/1/I/L)
@@ -116,7 +119,10 @@ campaigns/{campaignId}
 
 campaigns/{cid}/characters/{charId}
   ownerUid: string
-  name, klass, level, race, background: string
+  name, charClass, level, race, background: string
+                                    // "charClass", not "class" — `class` is a reserved
+                                    // word in JS/TS AND in Kotlin (the future Android app),
+                                    // so the field gets a safe name on every platform
   abilities: { str, dex, con, int, wis, cha }   // RAW scores; modifiers are derived
   hp: { current, max, temp }
   ac: number
@@ -139,10 +145,22 @@ campaigns/{cid}/messages/{msgId}
   createdAt: timestamp (serverTimestamp)
 ```
 
+### What the sheet covers — v1 vs the rest of the "TTRPG stat family"
+
+The v1 sheet carries the **combat core**: identity (name, class, level, race, background), the six ability scores with derived modifiers, HP (current/max/temp), AC, proficient skills, attacks, a simple spell list + casting ability, and equipment/notes as free text.
+
+Deferred to **v1.1+** (listed explicitly so nothing looks forgotten — these are the remaining members of the stat family):
+- **Conditions / status effects** (Poisoned, Stunned, Frightened…) — shown on the party view, GM can apply/remove
+- **Spell slots** — note: 5e has **no MP**; casters spend per-level slots that refresh on a rest. MP/mana exists in *other* systems, which is exactly why the stat list follows the ruleset decision
+- **Inventory + currency** (with optional carry weight)
+- **Death saves, inspiration, rest tracking** (short/long), XP/level-up progression
+
+Systems other than 5e swap this vocabulary (MP/mana, stamina, stress, meta-currencies…) — the sheet template is one data file, so the group's Q1 decision re-shapes the fields **without touching the architecture**. The final stat list is a ruleset decision, not an app decision.
+
 Design notes:
 - **Derived values are never stored** — `derived.ts` computes modifiers `floor((score − 10) / 2)`, proficiency bonus from level, skill bonuses, passive perception, spell DC. Pure + unit-tested. This kills a whole class of sync bugs.
 - **Display names are denormalized** into rolls/messages at write time, so rendering the log costs one read per item, not one extra lookup per author.
-- **Join flow:** player enters code → app queries `campaigns` where `joinCode == X` (single-field index, automatic) → `runTransaction` adds the uid to `memberUids` (guards: campaign exists, not already a member, roster cap ⚠️ 8 — decision Q3).
+- **Join flow:** player enters code → app queries `campaigns` where `joinCode == X` (single-field index, automatic) → `runTransaction` adds the uid to `memberUids` (guards: campaign exists, not already a member, roster cap **8 — confirmed by George, Q3**; one constant, trivially changeable).
 - **Indexes:** none needed beyond the automatic single-field ones in v1.
 
 ---
@@ -212,8 +230,8 @@ The Firebase **web** API key in `.env` is a public identifier by design, not a s
 
 | # | Goal | Acceptance criteria (George checks by running the app) |
 |---|---|---|
-| **M0** | Scaffold & conventions: React+Vite+TS, Tailwind, Firebase lib wired to `.env`, rules file stub, `CONTRIBUTING.md`, pinned deps, `.gitignore` with `.env` | `npm run dev` shows a styled placeholder home page; `npm run build` passes; `.env.example` documents every variable; **no features** |
-| **M1** | Auth & profile: email/password register+login+logout, anonymous guest, `users/{uid}` profile doc | Register → set display name → stay logged in after refresh; guest works; logged-out users see only auth screens; profile doc visible in Firebase console |
+| **M0** | Scaffold & conventions: React+Vite (+TypeScript unless the group votes otherwise on D2), Tailwind (D3 resolved), Firebase lib wired to `.env`, rules file stub, `CONTRIBUTING.md`, `contributions/` scaffold, pinned deps, `.gitignore` with `.env` | `npm run dev` shows a styled placeholder home page; `npm run build` passes; `.env.example` documents every variable; **no features** |
+| **M1** | Auth & profile: email/password register+login+logout, anonymous guest, `users/{uid}` profile doc. Built in that order — email/password defines the profile flow, then **Google sign-in is layered into the same milestone** (in Firebase it's ~20 extra lines on identical plumbing, not new architecture) | Register → set display name → stay logged in after refresh; guest works; Google login lands in the same profile flow; logged-out users see only auth screens; profile doc visible in Firebase console |
 | **M2** | Campaigns: create (become GM), join via 6-char code, campaign list, roster | In two browsers: A creates, B joins with code, both see the roster; B sees the campaign in their list; wrong code fails cleanly |
 | **M3** | Character sheets: create/edit 5e-lite sheet, derived stats computed & tested, GM edits any sheet, others read-only, live sync | A edits HP → B sees it change within ~1s with no refresh; invalid input (level 0, HP letters) rejected; derived modifiers correct (unit tests) |
 | **M4** | Dice roller + roll log: parser (`XdY+/-Z`, adv/dis on d20), roll buttons on sheet + free-form box, results append for everyone | A rolls `2d6+3` with advantage → B sees result with breakdown live; parser unit tests pass; log survives refresh |
@@ -264,3 +282,13 @@ Order rationale: every milestone is independently testable by running the app; t
 | Append-only roll log | Editable rolls | Kills conflicts by construction and matches how tables actually use logs |
 
 Open items (decisions D1–D4, questions Q1–Q4) live in `USER_TODO.md`.
+
+---
+
+## 11. Contribution workflow (George's friend-group protocol, agreed 2026-09-30)
+
+- Every human contributor keeps **`contributions/<name>.md`** in the repo: one appended entry per change — date, a one-paragraph "what & why", files touched, and anything the AI models need to know next time. If George builds solo, this collapses to a single `contributions/george.md`.
+- The entry gets posted to the group chat (WhatsApp or similar) **and** the file travels with the change/PR. The chat copy is for humans; the in-repo file is the durable record.
+- **Every AI session (any model, any person) gets fed:** `PLAN.md` + `DEVLOG.md` + `CONTRIBUTING.md` + the tail of the relevant `contributions/*.md`. That is the anti-drift mechanism — same context in, consistent code out.
+- Three logs, three jobs: `contributions/*.md` is the **human** log (why I changed things), `DEVLOG.md` is the **agent** log (commands, errors, decisions — append-only), `git log` is ground truth for both.
+- `CONTRIBUTING.md` (created at M0) bakes this in, plus the code conventions: modular v9+ Firebase imports only, service-layer pattern, rules changes require review, and the readability mandate from D3 — every non-obvious block gets a *why* comment, every module a short header comment, written so a reviewer can read the diff without the author in the room.
