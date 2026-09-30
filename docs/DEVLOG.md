@@ -73,3 +73,33 @@
 **Not tested / not verified:** still nothing built or run — plan-only by design. Node version claim is from George's own terminal output (v24.16.0).
 
 **Blocked on (George):** coursemate/group review → then D2 verdict + Firebase steps 2–7 → then the go-ahead. Phase 2 still does not start until he says so.
+
+---
+
+## Phase 1 — revision 2: external AI security review applied (2026-09-30)
+
+**Goal:** apply the docs-only revision George relayed from his external review (Claude, with ChatGPT/Grok Bot/Gemini/Grok findings). His instruction stands: **plan-only, no app code.**
+
+**Verification first (nothing was applied on trust):** all 6 claimed security-rules bugs were re-derived against PLAN §5 independently before touching the docs — every one confirmed.
+1. **Join flow was denied by our own rules** — §4 said "query campaigns by joinCode" while §5 only lets members read campaigns. A genuine self-contradiction in the previous plan; none of the first-round AIs caught it. Fix: `joinCodes/{code}` lookup collection (get-only, list denied), join = `getDoc` → server-side `arrayUnion` update; no client read of the campaign first. Cloud Functions (the textbook fix) need Blaze = paid → excluded; GM creates the code doc in the same batch as the campaign, `getAfter()` proves ownership.
+2. **Sheet hijack** — `characters` update checked the *incoming* `ownerUid`; any member could rewrite it and take someone's sheet. Fix: update checks the *existing* doc's owner + ownership is immutable (even for the GM).
+3. **Loose self-join** — `hasOnly(['memberUids'])` limited *fields*, not *list contents*; a joiner could add/remove others in the same write. Fix: new list must equal `old.concat([me])`.
+4. **Roster cap wasn't rules-enforced.** Fix: `memberUids.size() <= 8` in the rule itself.
+5. **Campaign create allowed pre-added members.** Fix: `memberUids == [auth.uid]` + name validation.
+6. **`isMember()`/`isGM()` undefined.** Fix: helpers defined; cost documented — verified via Firebase pricing docs that rules `get()`/`exists()`/`getAfter()` are **billed as reads even on rejection**, max 10 per single-doc/query request (20 batched). Our cost: ≤1 per operation.
+
+**Also adopted (and from whom):** ChatGPT's DECIDED/PROPOSED/OPEN/RULESET-DEPENDENT status tags + its honesty point that "template change, not rewrite" is optimistic — PLAN §1 now says M3+ get re-shaped after Q1; ChatGPT's contribution-entry template (PLAN §11); Grok Bot's "MVP draft" / "Stack (proposed)" relabels; its GM-approval promotion → **decision D5**; its gmNotes point → `gmNotes` subcollection added to model + GM-only rules, UI is **decision D6**; Claude's guest-orphan catch → M1 now ships an in-app guest upgrade (`linkWithCredential`, same uid keeps characters) — a stronger fix than the review's warning-only suggestion; Claude's RESEARCH.md idea → `docs/RESEARCH.md` created (per-system log template + free/legal candidate list, feeds the ≈March 2027 ruleset vote). Security-review checklist added to §5.
+
+**Not adopted (with reasons):** ChatGPT's "a ruleset defines what a character is" schema-*now* proposal — contradicts the agreed no-system-agnostic-engine decision; its status tags were adopted instead. Gemini's "open PowerShell as Administrator" — wrong, `-Scope CurrentUser` needs no admin (already documented correctly). Grok's summary-only reply — nothing to apply.
+
+**Git:** review said "git push" but the operative paste-ready prompt says "commit locally, do not push", and the standing rule is never push unasked → committed locally. Origin exists (`github.com/Shushino/TTRPG`), branch ahead by 3 after this commit; push on George's word. README fixed (it literally contained `"# TTRPG"` *with quotes*; the line-ending noise in the review was from the zip copy — the working tree was clean).
+
+**Files modified:** `PLAN.md` (§1 relabel + status tags + honesty caveat, §2 relabel, §4 joinCodes/gmNotes + join-flow redesign, §5 full rules rewrite + read-cost note + security-review checklist, §7 M1/M2, §9 risk 2 expanded + risk 8 rewritten + new risk 11, §10 +2 rows, §11 entry template), `USER_TODO.md` (revision header, D5/D6, pitch pack), `RESEARCH.md` (new), `README.md` (heading fixed). This entry.
+
+**Commands run:** `git status`/`git remote -v`/`git log` (verified 2-commits-ahead + origin exists + clean tree), grep for stale terms, web search ×1 (rules `get()` billing).
+
+**Errors:** one Edit anchor mismatch ("nothing but auth screens" vs actual "only auth screens") — fixed by grepping the real text. No others.
+
+**Not tested / not verified:** rules remain a **sketch** — they get proven in the emulator at M1/M2. One thing flagged to watch: the `diff()` + `arrayUnion` interaction in the self-join rule; if the emulator disagrees, the fallback is explicit field-equality checks. No app code exists, so nothing else is testable yet.
+
+**Next (George):** relay updated PLAN §4–§5 to Claude for the re-check → group votes D2/D5/D6 → Firebase steps 2–7 → go-ahead.

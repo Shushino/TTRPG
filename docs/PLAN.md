@@ -9,7 +9,7 @@ A web app where a tabletop RPG group creates a campaign space, keeps character s
 ## 1. What we're building (MVP scope)
 
 ### Game concept ⚠️
-- **System (working placeholder — final choice deliberately deferred):** D&D 5e-*lite* — the popular core only: six ability scores with computed modifiers, HP, AC, proficiency bonus, skills, attacks, and a simple spell list. Concretely 5e-shaped, but the sheet's fields live in **one template file** (`characterTemplate`), so switching systems later is a template change, not a rewrite. We are **not** building a system-agnostic engine (agreed trap for v1).
+- **System (working placeholder — final choice deliberately deferred):** D&D 5e-*lite* — the popular core only: six ability scores with computed modifiers, HP, AC, proficiency bonus, skills, attacks, and a simple spell list. Concretely 5e-shaped, but the sheet's fields live in **one template file** (`characterTemplate`), so switching systems later is a template change, not a rewrite. We are **not** building a system-agnostic engine (agreed trap for v1). **Honesty note for the pitch (external review):** "template change, not rewrite" is design intent, not magic — today the data model, the derived-stat functions, and the sheet UI are all 5e-shaped. After the Q1 decision, **M3+ get re-shaped** (sheets and dice most affected); accounts, campaigns, chat, and the roll-log infrastructure are unaffected.
 - **Ruleset status (George, 2026-09-30):** 5e-lite is a placeholder, not the decision — he hasn't researched TTRPGs yet and will, with his coursemates, over **~6 months (decision target ≈ March 2027)**. The build order is shaped so this is cheap: **M0–M2 (scaffold, auth, campaigns) are ruleset-independent**; M3+ consume the template file, so the decision only has to land before M3.
 - **Session shape (confirmed by George, Q2):** the GM creates the campaign, picks the ruleset and the setting, and shares it; players join, fill in their sheets, and get into character for the story. The campaign doc therefore carries a `setting` string (plain text in v1) for the GM's pitch: world, tone, house rules.
 - **Tone:** friendly utility. Dark theme, big touch targets — this gets used on phones at a physical table.
@@ -21,19 +21,24 @@ Create/join a campaign, edit **their own** character sheet, roll dice (standard 
 ### What the GM does (host = campaign creator)
 Everything players do, plus: edit any sheet, remove members, delete chat messages. GM-only settings live on the campaign page.
 
-### MVP features (5, locked)
-1. **Accounts** — email/password + anonymous guest login, display-name profile.
-2. **Campaign spaces** — create / join via code, member roster, GM role.
-3. **Character sheets** — 5e-lite template, live-synced, derived stats computed (modifiers, proficiency, etc.).
-4. **Dice roller + shared roll log** — notation parser (`2d6+3`, advantage/disadvantage on d20s), results append for the whole table.
-5. **Table chat** — live messages alongside the roll log.
+### MVP features (5 — draft, pending Q4 + the group review)
+
+Status tags used across this plan: **DECIDED** (locked by George's answers or earlier planning) · **PROPOSED** (my recommendation, the group can veto) · **OPEN** (deliberately undecided) · **RULESET-DEPENDENT** (shape follows the Q1 ruleset decision).
+
+1. **Accounts** — email/password first, then Google sign-in, plus anonymous guest with an **in-app upgrade path** (`linkWithCredential` — same uid, keeps characters). *DECIDED (D4)*
+2. **Campaign spaces** — create / join via code, member roster, GM role. Join resolves through a `joinCodes` lookup collection (§4/§5 — redesigned after external security review). *DECIDED (Q2)*
+3. **Character sheets** — live-synced, derived stats computed. The 5e-lite template is a **working example, not a commitment**. *PROPOSED · RULESET-DEPENDENT (Q1)*
+4. **Dice roller + shared roll log** — notation parser (`2d6+3`), results append for the whole table. Advantage/disadvantage is 5e vocabulary — the parser's extras follow the ruleset. *PROPOSED · RULESET-DEPENDENT (Q1)*
+5. **Table chat** — live messages alongside the roll log. *PROPOSED*
+
+Also DECIDED: party cap **8** (Q3). OPEN: ruleset (target ≈ March 2027), Q4 must-haves. PROPOSED: name "Hearth Table" (D1), GM approval on join (D5), GM notes UI (D6).
 
 ### Non-goals for v1 (explicit)
 Native Android/iOS apps (designed-in for later — see §8), maps/tokens/VTT, fog of war, initiative tracker, voice/video, homebrew sharing, multiple rulesets, public matchmaking, payments, custom domain, GM transfer/leave-campaign flows.
 
 ---
 
-## 2. Stack (locked)
+## 2. Stack (proposed — final pins at M0; the Firebase backend choice itself was settled in earlier planning and is not part of the group review)
 
 | Piece | Choice | Version verified 2026-09-30 |
 |---|---|---|
@@ -108,13 +113,18 @@ ttrpg/
 users/{uid}
   displayName: string, createdAt: timestamp
 
+joinCodes/{code}
+  campaignId: string                // join code → campaign lookup; lets a NON-member resolve
+                                    // a code without reading the campaign (see §5)
+
 campaigns/{campaignId}
   name: string
   system: "5e-lite"                 // ruleset placeholder until the group's Q1 decision
   setting: string                   // GM's shared pitch: world, tone, house rules (plain text v1)
   gmUid: string                     // creator
   memberUids: string[]              // GM included; used directly by security rules
-  joinCode: string                  // 6 chars, unambiguous alphabet (no 0/O/1/I/L)
+  joinCode: string                  // 6 chars, unambiguous alphabet (no 0/O/1/I/L); shown to
+                                    // the GM for sharing; resolved via joinCodes/{code}
   createdAt: timestamp
 
 campaigns/{cid}/characters/{charId}
@@ -132,6 +142,11 @@ campaigns/{cid}/characters/{charId}
   castingAbility: "int" | "wis" | "cha" | null  // for derived spell save DC
   equipment: string, notes: string
   updatedBy: string, updatedAt: timestamp
+
+campaigns/{cid}/gmNotes/{noteId}
+  text: string, createdAt: timestamp  // GM-private. Its own subcollection because rules are
+                                      // per-document — a "hidden field" on a shared doc is
+                                      // impossible. UI is decision D6.
 
 campaigns/{cid}/rolls/{rollId}
   rollerUid, rollerName: string     // display name denormalized → zero extra reads to render
@@ -160,51 +175,121 @@ Systems other than 5e swap this vocabulary (MP/mana, stamina, stress, meta-curre
 Design notes:
 - **Derived values are never stored** — `derived.ts` computes modifiers `floor((score − 10) / 2)`, proficiency bonus from level, skill bonuses, passive perception, spell DC. Pure + unit-tested. This kills a whole class of sync bugs.
 - **Display names are denormalized** into rolls/messages at write time, so rendering the log costs one read per item, not one extra lookup per author.
-- **Join flow:** player enters code → app queries `campaigns` where `joinCode == X` (single-field index, automatic) → `runTransaction` adds the uid to `memberUids` (guards: campaign exists, not already a member, roster cap **8 — confirmed by George, Q3**; one constant, trivially changeable).
+- **Join flow (redesigned after external security review):** player enters code → `getDoc(joinCodes/{code})` — any signed-in user may `get` a single code, but `list` is denied so codes can't be enumerated → the doc gives the campaignId → `updateDoc(campaign, { memberUids: arrayUnion(myUid) })` — a server-side array union, so the client never reads the campaign before joining. (The original design queried `campaigns` by joinCode — which our own member-only read rule **denied**; the plan contradicted itself, caught in external review, not by me.) The rules enforce what the old transaction "guards" pretended to: only `memberUids` changes, the new list is exactly `old + me`, cap ≤ 8. Wrong code → lookup fails → friendly error. Already a member → rule denies → shown as "already joined". Campaign full → size check denies. The GM creates the joinCode doc **in the same batch** as the campaign (`getAfter()` proves ownership — §5). A Cloud Function is the textbook tool here but requires the paid Blaze plan — excluded; the batched write is the free-tier equivalent.
 - **Indexes:** none needed beyond the automatic single-field ones in v1.
 
 ---
 
 ## 5. Security rules approach
 
-Principles: **default deny, auth required for everything, campaign membership is the gate.** Sketch (finalized in `firestore.rules` and emulator-tested before each milestone ships):
+Principles: **default deny, auth required for everything, campaign membership is the gate.** Sketch (finalized in `firestore.rules` and emulator-tested before each milestone ships). **This version applies the 2026-09-30 external security review — 6 bugs in the first sketch, all independently re-derived before fixing:**
 
 ```js
-match /users/{uid} {
-  allow read: if request.auth != null;
-  allow create, update: if request.auth.uid == uid;
-  allow delete: if false;
-}
-match /campaigns/{cid} {
-  allow read: if isMember(cid);
-  allow create: if request.auth.uid == request.resource.data.gmUid;
-  allow update: if isGM(cid)
-    || (signedIn()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids'])
-        && !(request.auth.uid in resource.data.memberUids)
-        && request.auth.uid in request.resource.data.memberUids);   // self-join only
-  match /characters/{charId} {
-    allow read: if isMember(cid);
-    allow create, update: if isMember(cid)
-      && (request.resource.data.ownerUid == request.auth.uid || isGM(cid));
-    allow delete: if resource.data.ownerUid == request.auth.uid || isGM(cid);
-  }
-  match /rolls/{rollId} {
-    allow read: if isMember(cid);
-    allow create: if isMember(cid) && request.resource.data.rollerUid == request.auth.uid;
-    allow update: if false;                       // roll log is immutable
-    allow delete: if isGM(cid);                   // GM moderation only
-  }
-  match /messages/{msgId} {
-    allow read: if isMember(cid);
-    allow create: if isMember(cid)
-      && request.resource.data.authorUid == request.auth.uid
-      && request.resource.data.text.size() <= 500;
-    allow update: if false;
-    allow delete: if isGM(cid);
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- helpers, defined once (review bug 6) ----
+    // Each get() is a BILLABLE Firestore read (cost note below this block).
+    function signedIn() { return request.auth != null; }
+    function campaign(cid) {
+      return get(/databases/$(database)/documents/campaigns/$(cid)).data;
+    }
+    function isMember(cid) {
+      return signedIn() && request.auth.uid in campaign(cid).memberUids;
+    }
+    function isGM(cid) {
+      return signedIn() && campaign(cid).gmUid == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();                 // display-name lookups only
+      allow create, update: if request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // Join code → campaign lookup. Exists so a NON-member can resolve a code
+    // without reading the campaign (review bug 1 — the old design was denied
+    // by our own member-only read rule). get-only: the collection can't be enumerated.
+    match /joinCodes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      // GM creates the code in the same batch as the campaign; getAfter()
+      // sees the post-batch campaign and proves ownership:
+      allow create: if signedIn()
+        && getAfter(/databases/$(database)/documents/campaigns/$(request.resource.data.campaignId)).data.gmUid == request.auth.uid;
+      allow update, delete: if false;            // codes immutable in v1 (rotate = new campaign)
+    }
+
+    match /campaigns/{cid} {
+      allow read: if isMember(cid);
+      allow create: if signedIn()
+        && request.resource.data.gmUid == request.auth.uid
+        && request.resource.data.memberUids == [request.auth.uid]    // review bug 5: no pre-added members
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100;
+      // Review bugs 3+4: the ONLY change a non-GM can make is appending their
+      // own uid, and the roster cap lives HERE, in the rule — not just app code.
+      allow update: if isGM(cid)
+        || (signedIn()
+            && !(request.auth.uid in resource.data.memberUids)                       // not already a member
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids'])
+            && request.resource.data.memberUids == resource.data.memberUids.concat([request.auth.uid])
+            && request.resource.data.memberUids.size() <= 8);                        // Q3 cap, rules-enforced
+
+      match /characters/{charId} {
+        allow read: if isMember(cid);
+        allow create: if isMember(cid)
+          && (request.resource.data.ownerUid == request.auth.uid || isGM(cid));      // GM may create NPC sheets
+        // Review bug 2: update checks the EXISTING doc's owner — checking the
+        // incoming data let any member hijack any sheet by rewriting ownerUid.
+        // Ownership is immutable, even for the GM.
+        allow update: if isMember(cid)
+          && (resource.data.ownerUid == request.auth.uid || isGM(cid))
+          && request.resource.data.ownerUid == resource.data.ownerUid;
+        allow delete: if resource.data.ownerUid == request.auth.uid || isGM(cid);
+      }
+
+      // GM-private notes: own subcollection, GM-only (UI is decision D6).
+      match /gmNotes/{noteId} {
+        allow read, write: if isGM(cid);
+      }
+
+      match /rolls/{rollId} {
+        allow read: if isMember(cid);
+        allow create: if isMember(cid)
+          && request.resource.data.rollerUid == request.auth.uid
+          && request.resource.data.notation is string
+          && request.resource.data.notation.size() <= 50;
+        allow update: if false;                    // roll log is immutable
+        allow delete: if isGM(cid);                // GM moderation only
+      }
+
+      match /messages/{msgId} {
+        allow read: if isMember(cid);
+        allow create: if isMember(cid)
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500;
+        allow update: if false;
+        allow delete: if isGM(cid);
+      }
+    }
   }
 }
 ```
+
+**Read cost of the helpers (verified against Firebase's pricing docs):** every `get()`/`exists()`/`getAfter()` in rules is **billed as a document read** — even when the rule *rejects* the request — with a hard cap of 10 document-access calls per single-document/query request (20 for batched writes). Our design needs at most 1 per operation (the campaign doc, deduplicated within a request; a party-view query pays +1 rules-read total). Comfortably inside the free tier — but counted, so helper `get()`s stay minimal and never grow per-document.
+
+**Security-review checklist (run on EVERY rules change — external review's ask):**
+1. Can a member act on someone **else's** document? Every write rule names the actor via the *existing* doc (`resource.data`), never `request.resource.data` alone.
+2. Can a write smuggle in a field change it shouldn't? (Self-join = `old.concat([me])` + `hasOnly(['memberUids'])`; ownership immutable.)
+3. Is every limit enforced **in the rules** (cap ≤ 8, text ≤ 500, notation ≤ 50), not just app code?
+4. Is anything listable that shouldn't be? (`joinCodes` is get-only.)
+5. Does the change stay within the 10-document-access-call budget per request?
+6. Emulator tests pass before merge — rules changes are PR-reviewed like code.
 
 - Rules ship with the app and are treated like code: changes go through PR review (fits the friend-group workflow).
 - **Testing:** Firebase Emulator Suite locally. Rules tests via `@firebase/rules-unit-testing` are the goal; a manual pass in the emulator UI is the acceptable minimum when Java setup is painful on Windows (see USER_TODO note on Java).
@@ -231,8 +316,8 @@ The Firebase **web** API key in `.env` is a public identifier by design, not a s
 | # | Goal | Acceptance criteria (George checks by running the app) |
 |---|---|---|
 | **M0** | Scaffold & conventions: React+Vite (+TypeScript unless the group votes otherwise on D2), Tailwind (D3 resolved), Firebase lib wired to `.env`, rules file stub, `CONTRIBUTING.md`, `contributions/` scaffold, pinned deps, `.gitignore` with `.env` | `npm run dev` shows a styled placeholder home page; `npm run build` passes; `.env.example` documents every variable; **no features** |
-| **M1** | Auth & profile: email/password register+login+logout, anonymous guest, `users/{uid}` profile doc. Built in that order — email/password defines the profile flow, then **Google sign-in is layered into the same milestone** (in Firebase it's ~20 extra lines on identical plumbing, not new architecture) | Register → set display name → stay logged in after refresh; guest works; Google login lands in the same profile flow; logged-out users see only auth screens; profile doc visible in Firebase console |
-| **M2** | Campaigns: create (become GM), join via 6-char code, campaign list, roster | In two browsers: A creates, B joins with code, both see the roster; B sees the campaign in their list; wrong code fails cleanly |
+| **M1** | Auth & profile: email/password register+login+logout, anonymous guest, `users/{uid}` profile doc. Built in that order — email/password defines the profile flow, then **Google sign-in is layered into the same milestone** (in Firebase it's ~20 extra lines on identical plumbing, not new architecture). Guests get an **in-app upgrade path** (`linkWithCredential`): same uid, their characters follow | Register → set display name → stay logged in after refresh; guest works; guest upgrades to a full account and keeps their sheets; Google login lands in the same profile flow; logged-out users see only auth screens; profile doc visible in Firebase console |
+| **M2** | Campaigns: create (become GM, joinCode doc created in the same batch), join via 6-char code (`joinCodes` lookup → server-side `arrayUnion` — no client read of the campaign first), campaign list, roster | In two browsers: A creates, B joins with code, both see the roster; B sees the campaign in their list; wrong code fails cleanly; a 9th member is denied by the rules; B's join write cannot add or remove anyone else (emulator-checked) |
 | **M3** | Character sheets: create/edit 5e-lite sheet, derived stats computed & tested, GM edits any sheet, others read-only, live sync | A edits HP → B sees it change within ~1s with no refresh; invalid input (level 0, HP letters) rejected; derived modifiers correct (unit tests) |
 | **M4** | Dice roller + roll log: parser (`XdY+/-Z`, adv/dis on d20), roll buttons on sheet + free-form box, results append for everyone | A rolls `2d6+3` with advantage → B sees result with breakdown live; parser unit tests pass; log survives refresh |
 | **M5** | Table chat: messages pane, live send/receive, GM delete | Two-way live messaging in two browsers; history persists; GM can delete; >500 chars rejected |
@@ -255,15 +340,16 @@ Order rationale: every milestone is independently testable by running the app; t
 ## 9. Risks & mitigations
 
 1. **Firestore free-tier quota.** ~50K reads/day is generous for a friend table (§6 math), but runaway listeners are the classic footgun. *Mitigation:* scoped listeners with teardown, log pagination (newest 100 + load-more), quota visible in the Firebase console usage tab, all data kept tiny.
-2. **Rules bugs = exposed or broken data** — the #1 real risk of a rules-first app. *Mitigation:* default-deny sketch reviewed now, emulator tests before every milestone ships, rules changes require PR review like code.
+2. **Rules bugs = exposed or broken data** — the #1 real risk of a rules-first app, and not theoretical: the first sketch had 6 (external review, 2026-09-30 — including a join flow our own rules would have denied, and a sheet-hijack via incoming-`ownerUid`). *Mitigation:* the §5 security-review checklist runs on every rules change, emulator tests before every milestone ships, rules changes require PR review like code.
 3. **Concurrent sheet edits (LWW).** Two people editing one sheet at once can silently clobber. *Mitigation:* single-owner editing in v1; GM edits rare; `updatedBy/updatedAt` surfaced. Real-time multi-editor locking is a documented v2 problem.
 4. **Billing surprise.** Impossible-ish: Spark has no card on file. Worst case = quota pause, never a charge. Phone auth stays off (it's the one common auth method that requires Blaze).
 5. **AI-agent drift / outdated Firebase patterns.** Agents love writing deprecated v8-style code. *Mitigation:* pinned versions, CONTRIBUTING.md mandates modular v9+ imports and copying patterns from `src/lib` + existing features, this file fed to every agent session.
 6. **Multi-person drift.** Friends + agents converge badly without force. *Mitigation:* CONTRIBUTING.md from day one, service-layer convention, small PRs with required review (George's own plan — keep it).
 7. **Windows emulator friction.** The Emulator Suite needs Java (JDK). *Mitigation:* rules tests are "goal, not gate" — a manual emulator-UI pass is the acceptable minimum; JDK install is a documented USER_TODO option, not a hard requirement.
-8. **Join-code brute force.** 6 chars from a 32-char unambiguous alphabet ≈ 1B combinations; campaign doc IDs are unguessable regardless; membership writes require an authenticated account. Fine for a private friend group; GM approval on join is a v1.1 option.
+8. **Join-code leaks & guests.** 6 chars from a 32-char unambiguous alphabet ≈ 1B combinations, and the lookup collection is get-only (can't be enumerated) — but "authenticated" includes anonymous guests, so anyone with a *leaked* code plus a guest login gets in. The real risk is sharing, not guessing. *Mitigation:* codes travel only in the group chat, the GM sees the roster and can remove members, cap is rules-enforced — and **GM approval on join is now decision D5** (promoted from v1.1 by external review), not a maybe.
 9. **Chat abuse/size.** 500-char cap enforced in rules (not just UI); GM can delete; logs paginated.
 10. **Version drift between now and M0.** Numbers in §2 were verified today; the pins at M0 are the source of truth. If a major version lands mid-project, we don't chase it.
+11. **Guest accounts are device-bound.** An anonymous login dies with its browser storage ("clear browsing data" = account gone), orphaning any characters owned by that uid. *Mitigation:* M1 ships the in-app upgrade path (`linkWithCredential` — same uid, characters follow), plus a visible warning on the guest button.
 
 ---
 
@@ -280,6 +366,8 @@ Order rationale: every milestone is independently testable by running the app; t
 | Vite static hosting | Firebase App Hosting, SSR frameworks | No SEO/server needs; App Hosting requires paid plan; static = simplest deploy |
 | Custom dice parser | npm dice library | ~100 lines, pure, unit-testable, zero dependencies, and it's a perfect first friend-contribution PR |
 | Append-only roll log | Editable rolls | Kills conflicts by construction and matches how tables actually use logs |
+| `joinCodes` lookup collection (get-only) | Querying campaigns by joinCode; Cloud Function joins | Our own member-only read rule denied the old lookup (external-review bug 1); Cloud Functions need Blaze = paid, excluded by constraint |
+| Ownership checked on the existing doc, immutable | Checking incoming `ownerUid` on update | The incoming-data check let any member hijack any sheet by rewriting the field (external-review bug 2) |
 
 Open items (decisions D1–D4, questions Q1–Q4) live in `USER_TODO.md`.
 
@@ -292,3 +380,16 @@ Open items (decisions D1–D4, questions Q1–Q4) live in `USER_TODO.md`.
 - **Every AI session (any model, any person) gets fed:** `PLAN.md` + `DEVLOG.md` + `CONTRIBUTING.md` + the tail of the relevant `contributions/*.md`. That is the anti-drift mechanism — same context in, consistent code out.
 - Three logs, three jobs: `contributions/*.md` is the **human** log (why I changed things), `DEVLOG.md` is the **agent** log (commands, errors, decisions — append-only), `git log` is ground truth for both.
 - `CONTRIBUTING.md` (created at M0) bakes this in, plus the code conventions: modular v9+ Firebase imports only, service-layer pattern, rules changes require review, and the readability mandate from D3 — every non-obvious block gets a *why* comment, every module a short header comment, written so a reviewer can read the diff without the author in the room.
+- Per-entry template for `contributions/<name>.md` (adopted from external review — keep it copy-paste easy):
+
+  ```md
+  ## <date> — <one-line summary of the change>
+  **What I changed:** …
+  **Why:** …
+  **Files touched:** …
+  **Decisions made:** …
+  **Notes for other contributors:** …
+  **Notes for AI agents:** …
+  **Testing performed:** …
+  **Known problems:** …
+  ```

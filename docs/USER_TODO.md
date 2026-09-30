@@ -3,6 +3,8 @@
 Every item says **what** it is, **why** it's needed, and **which milestone it blocks**. Nothing here costs money.
 
 > **Status after George's 2026-09-30 review:** Q2/Q3 confirmed, D1/D3/D4 resolved, Q1/Q4/D2 deliberately open pending his research and the group review. Firebase setup (steps 2–7) waits for friend feedback — that's fine, nothing else is time-sensitive.
+>
+> **Revision 2 (same day, external AI review applied):** 6 security-rules bugs fixed in PLAN §5 (join flow redesigned via `joinCodes`, sheet-hijack hole closed, cap rules-enforced), decisions **D5/D6 added**, `docs/RESEARCH.md` created, "locked" labels softened to draft/proposed. Send the updated PLAN.md back to Claude for the rules re-check.
 
 ---
 
@@ -21,7 +23,9 @@ Every item says **what** it is, **why** it's needed, and **which milestone it bl
   > **Brief (D2 — TypeScript vs JavaScript):** Project: React 19 + Vite web app, Firebase Auth + Firestore backend, multiple contributors including AI agents; contributors are beginners currently learning JS. **Option A — TypeScript:** catches cross-contributor/agent drift bugs at compile time (a typo'd field name fails the build instead of silently breaking at a friend's table); industry standard for team React apps; cost: type syntax in every file, slightly steeper start. **Option B — plain JavaScript:** zero extra syntax and matches what George is learning right now; cost: no compile-time safety net — the exact bug class a multi-contributor, multi-agent project drifts into. Recommendation from ZCode's planning pass: **TypeScript**, with strict-but-minimal config and a documented comment convention. Reversibility: trivial before M0, painful after M2.
 
 - **D3 — Styling: RESOLVED — Tailwind CSS 4, under George's readability mandate.** He set the rule: "use the better one, as long as the code is human-readable with comments." Tailwind wins for this project (agent-generated UI stays consistent, no naming drift between contributors), and the readability concern is handled by convention, codified in `CONTRIBUTING.md` at M0: reused styles become **named component classes with comments** (Tailwind's `@apply`), every component gets a header comment, and reviewers should be able to read a diff cold. If the group later votes plain CSS, the swap is cheap before M0 only. *Blocks: M0.*
-- **D4 — Login methods: RESOLVED — both, in M1.** Email/password is built first (it defines the profile flow — George's instinct was right), then **Google sign-in is layered into the same milestone**: in Firebase it's ~20 extra lines on identical plumbing, not a new architecture. *Blocks: M1 scope, now set.*
+- **D4 — Login methods: RESOLVED — both, in M1.** Email/password is built first (it defines the profile flow — George's instinct was right), then **Google sign-in is layered into the same milestone**: in Firebase it's ~20 extra lines on identical plumbing, not a new architecture. Guests also get an **in-app upgrade path** (`linkWithCredential`) — same uid, keeps their characters — because anonymous accounts die with browser storage (external review catch). *Blocks: M1 scope, now set.*
+- **D5 — GM approval on join: OPEN — group vote.** Promoted from "v1.1 maybe" by external review: today anyone signed in — *including anonymous guests* — who has the join code can join. For a trusted friend group my recommendation is **code-only for v1** (codes are unguessable and can't be enumerated, the cap is enforced by security rules, and the GM can remove members), adding an approval flow only when campaigns get shared beyond the circle. The vote changes M2's shape. *Blocks: M2.*
+- **D6 — GM-private notes: OPEN — group wish-list.** The `gmNotes` subcollection and its GM-only rules are already in the plan (data + security are nearly free now); the question is whether the group wants a GM-notes UI in v1 or pen-and-paper until v1.1. *Blocks: nothing.*
 
 ## C. One-time setup (click-by-click, all free)
 
@@ -47,7 +51,7 @@ Two findings from George's terminal test:
 
 ## D. Pitch pack — what to send friends / other AI models
 
-The review set is: **`PLAN.md`** (the whole architecture), **`DEVLOG.md`** (what happened so far), and for other AI models additionally the **D2 brief** in §B above. `USER_TODO.md` (this file) shows them the open decisions. When collaborators join: each keeps `contributions/<name>.md` (protocol in PLAN.md §11); solo builds collapse it to `contributions/george.md`.
+The review set is: **`PLAN.md`** (the whole architecture), **`DEVLOG.md`** (what happened so far), **`RESEARCH.md`** (grows as systems get played during the 6-month research phase), and for other AI models additionally the **D2 brief** in §B above. `USER_TODO.md` (this file) shows them the open decisions. When collaborators join: each keeps `contributions/<name>.md` (protocol + entry template in PLAN.md §11); solo builds collapse it to `contributions/george.md`.
 
 ## E. Heads-up for later (nothing to do now)
 
