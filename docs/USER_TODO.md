@@ -7,6 +7,8 @@ Every item says **what** it is, **why** it's needed, and **which milestone it bl
 > **Revision 2 (same day, external AI review applied):** 6 security-rules bugs fixed in PLAN §5 (join flow redesigned via `joinCodes`, sheet-hijack hole closed, cap rules-enforced), decisions **D5/D6 added**, `docs/RESEARCH.md` created, "locked" labels softened to draft/proposed. Send the updated PLAN.md back to Claude for the rules re-check.
 >
 > **Revision 3 (2026-10-01, 2nd external review round):** Gemini's two "critical bugs" verified **phantom** (its "corrected" rules were line-for-line identical to ours — diffed, rejected). Grok's real bug fixed: the campaign-*list* query would have been denied by the get()-based read rule ("rules are not filters" — Firebase docs confirmed). Also: GM update locked, `users` get-only, `joinCodes` type check, a **known-limits & trust-model** section and an **8-case emulator test set** added to PLAN §5. Push still pending George's explicit word.
+>
+> **Revision 4 (2026-10-01, 3rd review round = sign-off):** Claude read the actual files and found **no new security bugs** — all four reviewers concur. New decisions **D7** (does the cap count the GM?) and **D8** (App Check vs anonymous spam) added; emulator test set now 9 cases; JDK moved into setup (§C step 9); `.gitattributes` added to M0. autocrlf is already `true` on this machine and the working tree is clean — the CRLF-noise README exists only in the zip copies reviewers examined.
 
 ---
 
@@ -28,6 +30,8 @@ Every item says **what** it is, **why** it's needed, and **which milestone it bl
 - **D4 — Login methods: RESOLVED — both, in M1.** Email/password is built first (it defines the profile flow — George's instinct was right), then **Google sign-in is layered into the same milestone**: in Firebase it's ~20 extra lines on identical plumbing, not a new architecture. Guests also get an **in-app upgrade path** (`linkWithCredential`) — same uid, keeps their characters — because anonymous accounts die with browser storage (external review catch). *Blocks: M1 scope, now set.*
 - **D5 — GM approval on join: OPEN — group vote.** Promoted from "v1.1 maybe" by external review: today anyone signed in — *including anonymous guests* — who has the join code can join. For a trusted friend group my recommendation is **code-only for v1** (codes are unguessable and can't be enumerated, the cap is enforced by security rules, and the GM can remove members), adding an approval flow only when campaigns get shared beyond the circle. The vote changes M2's shape. *Blocks: M2.*
 - **D6 — GM-private notes: OPEN — group wish-list.** The `gmNotes` subcollection and its GM-only rules are already in the plan (data + security are nearly free now); the question is whether the group wants a GM-notes UI in v1 or pen-and-paper until v1.1. *Blocks: nothing.*
+- **D7 — Does the party cap include the GM? OPEN — group vote (3rd review catch).** Today the rules cap `memberUids` at **8 total including the GM** → 7 players + GM. George's "6–8 for one leader to manage" probably meant 6–8 *players* (→ cap 9). My recommendation: **9** (GM + 8 players), since the mental-load argument was about players. One constant + one test-case number change. *Blocks: M2 (the cap constant and its test).*
+- **D8 — App Check before deploy: OPEN — recommend YES (3rd review catch).** Once the app is hosted publicly, anyone with the URL can mint anonymous guest accounts and burn the 20k/day write quota — an availability problem, not a data leak. Firebase **App Check** (free tier) blocks non-app traffic. Cheap at M6, annoying to retrofit after abuse. *Blocks: M6.*
 
 ## C. One-time setup (click-by-click, all free)
 
@@ -50,6 +54,7 @@ Two findings from George's terminal test:
 7. **Fill in `.env`** — at M0 I'll create `.env.example` with exactly: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`; you paste the step-4 values. (They're public identifiers, not secrets — see PLAN.md §5 — kept out of git anyway.) *Blocks: M1.*
 
 8. **(Only at M6)** Firebase CLI for deploy: `npm install -g firebase-tools` → `firebase login`. *Blocks: M6.*
+9. **(Optional, recommended before M2)** Install a JDK (17+, e.g. Eclipse Temurin from https://adoptium.net) — the Firebase Emulator Suite needs Java, and the M2 milestone is gated on running the 9-case rules test set locally. Installing it now, with the rest of setup, avoids discovering the dependency mid-milestone (3rd review's point). *Blocks: M2 test set.*
 
 ## D. Pitch pack — what to send friends / other AI models
 
@@ -59,10 +64,10 @@ The review set is: **`PLAN.md`** (the whole architecture), **`DEVLOG.md`** (what
 
 - **Android Studio / Kotlin: not needed for this web app.** The native Android phase is months away; the web learning path (HTML/CSS/JS → React) comes first. PLAN.md §8 keeps the Android path open without extra work today.
 - **Phone testing at M6:** two phones on the hosted URL. That's the whole requirement.
-- **Java (JDK):** only if we run the emulator's rules tests locally (PLAN.md §9.7). Optional; instructions provided if we go there.
+- **Java (JDK):** needed for the M2 emulator test set — now a proper setup step (§C step 9) so it's installed before M2, not discovered during it.
 
 ## F. Honest notes (so nothing surprises you)
 
 - **Spark plan can't charge you.** No card on file = worst case is quotas pausing until midnight Pacific. PLAN.md §6 shows a table session uses a small fraction of the daily quota.
 - **Self-reported logs vs reality:** claims in `DEVLOG.md` are checkable via `git log` / `git diff` — the devlog explains, git verifies.
-- **What happens next:** relay the updated PLAN §5 to Claude for the re-check. Push decision is yours (`git push origin main` — 4 local commits, docs-only, or tell me to). Then: group votes D2/D5/D6 → Firebase steps 2–7 → the go-ahead, and I start **M0 only**, stop, and you test.
+- **What happens next:** the rules have a four-model sign-off (3rd review round) — the plan is ready for your coursemates. Push decision remains yours (`git push origin main` — docs-only commits). Then: group votes **D2, D5, D6, D7, D8** → Firebase steps 2–7 (+ JDK step 9) → the go-ahead, and I start **M0 only**, stop, and you test.

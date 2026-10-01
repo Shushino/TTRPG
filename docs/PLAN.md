@@ -31,7 +31,7 @@ Status tags used across this plan: **DECIDED** (locked by George's answers or ea
 4. **Dice roller + shared roll log** — notation parser (`2d6+3`), results append for the whole table. Advantage/disadvantage is 5e vocabulary — the parser's extras follow the ruleset. *PROPOSED · RULESET-DEPENDENT (Q1)*
 5. **Table chat** — live messages alongside the roll log. *PROPOSED*
 
-Also DECIDED: party cap **8** (Q3). OPEN: ruleset (target ≈ March 2027), Q4 must-haves. PROPOSED: name "Hearth Table" (D1), GM approval on join (D5), GM notes UI (D6).
+Also DECIDED: party cap **8** (Q3) — *today that reads as 8 total including the GM (7 players + GM); the group vote **D7** decides whether George's "6–8" meant players and the constant becomes 9*. OPEN: ruleset (target ≈ March 2027), Q4 must-haves, D7 cap semantics, D8 App Check. PROPOSED: name "Hearth Table" (D1), GM approval on join (D5), GM notes UI (D6).
 
 ### Non-goals for v1 (explicit)
 Native Android/iOS apps (designed-in for later — see §8), maps/tokens/VTT, fog of war, initiative tracker, voice/video, homebrew sharing, multiple rulesets, public matchmaking, payments, custom domain, GM transfer/leave-campaign flows.
@@ -175,7 +175,7 @@ Systems other than 5e swap this vocabulary (MP/mana, stamina, stress, meta-curre
 Design notes:
 - **Derived values are never stored** — `derived.ts` computes modifiers `floor((score − 10) / 2)`, proficiency bonus from level, skill bonuses, passive perception, spell DC. Pure + unit-tested. This kills a whole class of sync bugs.
 - **Display names are denormalized** into rolls/messages at write time, so rendering the log costs one read per item, not one extra lookup per author.
-- **Join flow (redesigned after external security review):** player enters code → `getDoc(joinCodes/{code})` — any signed-in user may `get` a single code, but `list` is denied so codes can't be enumerated → the doc gives the campaignId → `updateDoc(campaign, { memberUids: arrayUnion(myUid) })` — a server-side array union, so the client never reads the campaign before joining. (The original design queried `campaigns` by joinCode — which our own member-only read rule **denied**; the plan contradicted itself, caught in external review, not by me.) The rules enforce what the old transaction "guards" pretended to: only `memberUids` changes, the new list is exactly `old + me`, cap ≤ 8. Wrong code → lookup fails → friendly error. Already a member → rule denies → shown as "already joined". Campaign full → size check denies. The GM creates the joinCode doc **in the same batch** as the campaign (`getAfter()` proves ownership — §5). A Cloud Function is the textbook tool here but requires the paid Blaze plan — excluded; the batched write is the free-tier equivalent.
+- **Join flow (redesigned after external security review):** player enters code → `getDoc(joinCodes/{code})` — any signed-in user may `get` a single code, but `list` is denied so codes can't be enumerated → the doc gives the campaignId → `updateDoc(campaign, { memberUids: arrayUnion(myUid) })` — a server-side array union, so the client never reads the campaign before joining. (The original design queried `campaigns` by joinCode — which our own member-only read rule **denied**; the plan contradicted itself, caught in external review, not by me.) The rules enforce what the old transaction "guards" pretended to: only `memberUids` changes, the new list is exactly `old + me`, cap ≤ 8 (today that's total including the GM — decision D7). Wrong code → lookup fails → friendly error. Already a member → rule denies → shown as "already joined". Campaign full → size check denies. The GM creates the joinCode doc **in the same batch** as the campaign (`getAfter()` proves ownership — §5). A Cloud Function is the textbook tool here but requires the paid Blaze plan — excluded; the batched write is the free-tier equivalent.
 - **Indexes:** none needed beyond the automatic single-field ones in v1.
 
 ---
@@ -315,6 +315,7 @@ service cloud.firestore {
 - **Character create lets the GM set any `ownerUid`** — deliberate: that's how the GM pre-creates a sheet for a player or an NPC. Players can only create sheets they own.
 - **The GM branch of the campaign update rule doesn't lock `setting`/`system`/`createdAt`** — GM-editable by design in v1.
 - **Guest upgrade can fail** with `credential-already-in-use` if the Google/email account already belongs to another user. M1 must catch that Firebase error code and offer "sign in with that account instead" (the anonymous session's characters don't transfer in that edge case — warn before upgrade).
+- **Anonymous-account spam (3rd review's parting catch):** once hosted, anyone with the public URL can mint guest accounts and burn the 20k/day write quota — an *availability* problem, not a data leak. The fix is Firebase **App Check** (free tier); cheap to add at M6, annoying to retrofit after abuse. Decision **D8**: enable before deploy.
 
 **Security-review checklist (run on EVERY rules change — external review's ask):**
 1. Can a member act on someone **else's** document? Every write rule names the actor via the *existing* doc (`resource.data`), never `request.resource.data` alone.
@@ -328,12 +329,13 @@ service cloud.firestore {
 **M2 emulator test set (must pass before M2 ships — from 2nd review):**
 1. Member's campaign-list query (`where('memberUids','array-contains',uid)`) **succeeds** — proves the query-safe read rule.
 2. Non-member (or signed-out) campaign list **denied**.
-3. 9th join **denied** by the size check.
+3. Join past the cap **denied** by the size check (currently the 9th — D7 may make it the 10th).
 4. Joiner adding or removing *other* uids in the join write **denied** by the concat check.
 5. Sheet hijack (member rewriting someone's `ownerUid`) **denied**.
 6. GM changing `gmUid` or `joinCode` **denied**; GM removing a member **allowed**.
 7. `users` list query **denied**; `users/{uid}` get by a signed-in user allowed.
 8. Characters subcollection query as a member **succeeds** (proves fixed-path `isMember()` works for subcollection lists); as a non-member **denied**.
+9. **arrayUnion self-join succeeds** and the new uid lands at the **end** of the list — proves the `old.concat([me])` ordering assumption (3rd review: keep it an explicit test rather than a semantics debate; if the emulator disagrees, switch to the explicit field-check fallback).
 
 - Rules ship with the app and are treated like code: changes go through PR review (fits the friend-group workflow).
 - **Testing:** Firebase Emulator Suite locally. Rules tests via `@firebase/rules-unit-testing` are the goal; a manual pass in the emulator UI is the acceptable minimum when Java setup is painful on Windows (see USER_TODO note on Java).
@@ -359,9 +361,9 @@ The Firebase **web** API key in `.env` is a public identifier by design, not a s
 
 | # | Goal | Acceptance criteria (George checks by running the app) |
 |---|---|---|
-| **M0** | Scaffold & conventions: React+Vite (+TypeScript unless the group votes otherwise on D2), Tailwind (D3 resolved), Firebase lib wired to `.env`, rules file stub, `CONTRIBUTING.md`, `contributions/` scaffold, pinned deps, `.gitignore` with `.env` | `npm run dev` shows a styled placeholder home page; `npm run build` passes; `.env.example` documents every variable; **no features** |
+| **M0** | Scaffold & conventions: React+Vite (+TypeScript unless the group votes otherwise on D2), Tailwind (D3 resolved), Firebase lib wired to `.env`, rules file stub, `CONTRIBUTING.md`, `contributions/` scaffold, `.gitattributes` (`* text=auto` — ends Windows CRLF churn for every future contributor), pinned deps, `.gitignore` with `.env` | `npm run dev` shows a styled placeholder home page; `npm run build` passes; `.env.example` documents every variable; **no features** |
 | **M1** | Auth & profile: email/password register+login+logout, anonymous guest, `users/{uid}` profile doc. Built in that order — email/password defines the profile flow, then **Google sign-in is layered into the same milestone** (in Firebase it's ~20 extra lines on identical plumbing, not new architecture). Guests get an **in-app upgrade path** (`linkWithCredential`): same uid, their characters follow | Register → set display name → stay logged in after refresh; guest works; guest upgrades to a full account and keeps their sheets; Google login lands in the same profile flow; logged-out users see only auth screens; profile doc visible in Firebase console |
-| **M2** | Campaigns: create (become GM, joinCode doc created in the same batch), join via 6-char code (`joinCodes` lookup → server-side `arrayUnion` — no client read of the campaign first), campaign list (query: `where('memberUids','array-contains',uid)` — the read rule is written to be provable from exactly that constraint), roster | In two browsers: A creates, B joins with code, both see the roster; B's campaign-list query returns the campaign; wrong code fails cleanly; a 9th member is denied by the rules; B's join write cannot add or remove anyone else; the §5 emulator test set passes |
+| **M2** | Campaigns: create (become GM, joinCode doc created in the same batch), join via 6-char code (`joinCodes` lookup → server-side `arrayUnion` — no client read of the campaign first), campaign list (query: `where('memberUids','array-contains',uid)` — the read rule is written to be provable from exactly that constraint), roster | In two browsers: A creates, B joins with code, both see the roster; B's campaign-list query returns the campaign; wrong code fails cleanly; a join past the cap is denied by the rules (D7 decides whether that's the 9th or 10th member); B's join write cannot add or remove anyone else; the §5 emulator test set passes |
 | **M3** | Character sheets: create/edit 5e-lite sheet, derived stats computed & tested, GM edits any sheet, others read-only, live sync | A edits HP → B sees it change within ~1s with no refresh; invalid input (level 0, HP letters) rejected; derived modifiers correct (unit tests) |
 | **M4** | Dice roller + roll log: parser (`XdY+/-Z`, adv/dis on d20), roll buttons on sheet + free-form box, results append for everyone | A rolls `2d6+3` with advantage → B sees result with breakdown live; parser unit tests pass; log survives refresh |
 | **M5** | Table chat: messages pane, live send/receive, GM delete | Two-way live messaging in two browsers; history persists; GM can delete; >500 chars rejected |
@@ -383,7 +385,7 @@ Order rationale: every milestone is independently testable by running the app; t
 
 ## 9. Risks & mitigations
 
-1. **Firestore free-tier quota.** ~50K reads/day is generous for a friend table (§6 math), but runaway listeners are the classic footgun. *Mitigation:* scoped listeners with teardown, log pagination (newest 100 + load-more), quota visible in the Firebase console usage tab, all data kept tiny.
+1. **Firestore free-tier quota.** ~50K reads/day is generous for a friend table (§6 math), but runaway listeners are the classic footgun. *Mitigation:* scoped listeners with teardown, log pagination (newest 100 + load-more), quota visible in the Firebase console usage tab, all data kept tiny. The realistic abuse vector once hosted is anonymous-account spam from the public URL — **App Check** (free, decision D8) goes in before the M6 deploy.
 2. **Rules bugs = exposed or broken data** — the #1 real risk of a rules-first app, and not theoretical: round 1 (2026-09-30) found 6, including a join flow our own rules would have denied and a sheet-hijack via incoming-`ownerUid`; round 2 (2026-10-01) found the campaign-list query hole ("rules are not filters") and an unconstrained GM update — and also produced 2 phantom bugs, which is why every claim gets re-derived before patching. *Mitigation:* the §5 security-review checklist runs on every rules change, the §5 emulator test set gates M2, rules changes require PR review like code.
 3. **Concurrent sheet edits (LWW).** Two people editing one sheet at once can silently clobber. *Mitigation:* single-owner editing in v1; GM edits rare; `updatedBy/updatedAt` surfaced. Real-time multi-editor locking is a documented v2 problem.
 4. **Billing surprise.** Impossible-ish: Spark has no card on file. Worst case = quota pause, never a charge. Phone auth stays off (it's the one common auth method that requires Blaze).

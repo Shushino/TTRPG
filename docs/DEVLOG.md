@@ -127,3 +127,30 @@
 **Not tested / not verified:** all rules remain a sketch — the 8-case emulator set exists precisely to convert claims into proofs at M2. The subcollection-query claim (fixed-path get() works for list) is test case 8.
 
 **Next (George):** Claude's re-check of the patched blocks → push decision → group votes D2/D5/D6 → Firebase steps 2–7 → go-ahead.
+
+---
+
+## Phase 1 — revision 4: third review round = sign-off (2026-10-01)
+
+**Goal:** process round 3. Claude read the actual repo files (not summaries) and found **no new security bugs** — the first round where all four reviewers (Claude, ChatGPT, Gemini, Grok Bot) concur on the state. No verification drama this round; the remaining items are decisions and hygiene.
+
+**Adopted:**
+- **D7 — cap semantics (Claude's catch):** the rules cap `memberUids` at 8 *total including the GM* (7 players + GM), but George's "6–8 for one leader to manage" probably meant 6–8 *players* (→ cap 9). Recorded as an open group decision with recommendation = 9; PLAN wording now says "8 total including the GM — D7 decides" everywhere the number appears (§1 status line, §4 join flow, §7 M2 acceptance, §5 test case 3).
+- **D8 — App Check (Claude's catch):** once hosted, anyone with the public URL can mint guest accounts and burn the 20k/day write quota — availability, not data-leak. Added to §5 known limits + §9 risk 1; decision = enable before M6 deploy (free tier).
+- **Test case 9:** arrayUnion self-join must place the new uid at the END of the list — the `old.concat([me])` ordering assumption becomes an explicit emulator test instead of a semantics debate (ChatGPT agreed: let the emulator be the authority). Test set is now 9 cases.
+- **JDK as a setup step (§C step 9, Temurin 17+):** the M2 gate needs the emulator; install Java with the rest of setup rather than discovering it mid-milestone.
+- **`.gitattributes` (`* text=auto`) added to M0 deliverables:** ends Windows CRLF churn for every future contributor.
+
+**Checked, nothing to do:** autocrlf is already `true` on this machine (Claude's `git config core.autocrlf true` is a no-op here) and the working tree is clean — the "dirty README (CRLF)" exists only in the zip copies reviewers unzipped, not in the repo.
+
+**Git:** round 3 again recommends push (now unanimous across all four reviewers); no paste-ready prompt this round and no explicit "push" from George himself — standing rule holds, committed locally only. Push is one word away.
+
+**Files modified:** `PLAN.md` (§1 status line, §4 join flow, §5 known limits + test case 3/9, §7 M0/M2 rows, §9 risk 1), `USER_TODO.md` (revision header, D7/D8, §C step 9, §E Java note, §F next steps), this entry.
+
+**Commands run:** `git config core.autocrlf` (local: true, global: unset), `git status -sb` (clean, ahead 4).
+
+**Errors:** one Edit anchor mismatch in the test set (old item-3 wording) — grepped the real text, retried clean.
+
+**Not tested / not verified:** unchanged — rules are still a sketch until the 9-case emulator set runs at M2; App Check is planned, not configured.
+
+**Where the project stands:** planning complete and reviewer-signed → group votes D2/D5/D6/D7/D8 → Firebase + JDK setup → George's go-ahead → M0 only.
