@@ -154,3 +154,29 @@
 **Not tested / not verified:** unchanged — rules are still a sketch until the 9-case emulator set runs at M2; App Check is planned, not configured.
 
 **Where the project stands:** planning complete and reviewer-signed → group votes D2/D5/D6/D7/D8 → Firebase + JDK setup → George's go-ahead → M0 only.
+
+---
+
+## Phase 1 — revision 5: fourth review round — Codex's catch + wording corrected (2026-10-01)
+
+**Goal:** process round 4, which brought a fifth reviewer (Codex, first appearance) and two legitimate corrections to *my* claims. Docs-only, no app code.
+
+**Verification first:**
+- **Codex's delete-rule edge — confirmed by re-derivation.** `allow delete: if resource.data.ownerUid == request.auth.uid || isGM(cid)` — for a delete, `resource.data` is the existing character doc, and a *removed* member's uid still matches `ownerUid`, so an ex-member could delete their old sheet. Low impact (it's their own data) but it breaks the plan's own "membership gates access" principle — and the GM may want to preserve/inspect a removed player's sheet. Fix applied: `allow delete: if isMember(cid) && (owner || isGM)`. GM still works (GM is always in `memberUids`). New **test case 10**: removed member cannot delete their old character; current owner and GM still can.
+- **Codex's "no firestore.rules file" — confirmed** (`ls firestore.rules` → not found). The rules exist only as a sketch inside PLAN.md.
+- **Claude's contradiction find — confirmed, and it was mine.** PLAN §9 risk 7 still said the emulator tests were "goal, not gate" (a leftover from the original plan, before rounds 2–3 made the test set an M2 acceptance gate). Resolved in favor of GATE: the 10-case set is mandatory for M2 and every rules change; a manual emulator-UI pass is the documented fallback **only** if the JDK genuinely won't install, and using the fallback must be recorded here.
+- **"Security sign-off" overclaim — accepted.** Round 3's agreement was four models reading text; nothing had run. All sign-off wording is corrected to **review sign-off — rules UNVERIFIED until the emulator set passes** (PLAN §5 verification-status line, USER_TODO, DEVLOG, memory). Codex's standard is now the project standard: *running beats agreeing*.
+
+**Also adopted:** App Check must be in **enforce** mode (registering alone blocks nothing — Codex); D7's constant explicitly stays **8 until the group votes** (Gemini's round-4 summary said "explicitly set to 9" — misread of my chat summary; the docs never changed the rule).
+
+**Git:** push verdicts split for the first time — Claude/Gemini/Grok/Grok Bot say push, Codex says hold (his caution is about the *verified* claim, not git per Claude). The round-4 paste-ready prompt again says "commit locally, do not push", and George still hasn't said the word himself. Holding: committed locally only.
+
+**Files modified:** `PLAN.md` (§5 verification-status line, characters delete rule + comment, known-limits App Check note, test case 10, §9 risk 7 rewritten), `USER_TODO.md` (revision header, D7/D8 clarifications, §F wording), this entry.
+
+**Commands run:** `ls firestore.rules` (absent), grep for "goal, not gate" / delete rule / "sign-off" wording.
+
+**Errors:** none.
+
+**Not tested / not verified:** the rules remain a sketch — that's now written into §5 itself. The 10-case emulator set is the gate that converts review agreement into verification at M2.
+
+**Next (George):** push decision (split verdict, your word) → optional one-page decisions summary from Claude for the WhatsApp pitch → group votes D2/D5/D6/D7/D8 → Firebase + JDK setup → go-ahead → M0 only.

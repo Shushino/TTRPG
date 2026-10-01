@@ -184,6 +184,8 @@ Design notes:
 
 Principles: **default deny, auth required for everything, campaign membership is the gate.** Sketch (finalized in `firestore.rules` and emulator-tested before each milestone ships). **Two external review rounds applied, every claim re-derived before fixing:** round 1 (2026-09-30) — 6 bugs in the first sketch; round 2 (2026-10-01) — the campaign-*list* query was denied by the get()-based read rule ("rules are not filters", Grok's catch; Firebase docs confirmed), the GM update path was unconstrained, and `users` allowed profile enumeration. Round 2 also produced two *phantom* bugs (Gemini's "corrected" rules were line-for-line identical to ours — diffed and rejected): the discipline is 検証, verification beats consensus.
 
+**Verification status (stated plainly, 4th review — Codex's standard):** this is a **sketch only**. No `firestore.rules` file exists in the repo yet, and none of these rules has ever executed. The four-model agreement is a **review sign-off, not a security sign-off** — the rules are **UNVERIFIED** until the test set below passes in the emulator (file created at M0/M1, proven at M2).
+
 ```js
 rules_version = '2';
 service cloud.firestore {
@@ -272,7 +274,11 @@ service cloud.firestore {
         allow update: if isMember(cid)
           && (resource.data.ownerUid == request.auth.uid || isGM(cid))
           && request.resource.data.ownerUid == resource.data.ownerUid;
-        allow delete: if resource.data.ownerUid == request.auth.uid || isGM(cid);
+        // 4th review (Codex's catch): delete must ALSO require membership —
+        // otherwise a removed player could still delete their old sheet.
+        // GM deletes still work: the GM is always in memberUids.
+        allow delete: if isMember(cid)
+          && (resource.data.ownerUid == request.auth.uid || isGM(cid));
       }
 
       // GM-private notes: own subcollection, GM-only (UI is decision D6).
@@ -315,7 +321,7 @@ service cloud.firestore {
 - **Character create lets the GM set any `ownerUid`** — deliberate: that's how the GM pre-creates a sheet for a player or an NPC. Players can only create sheets they own.
 - **The GM branch of the campaign update rule doesn't lock `setting`/`system`/`createdAt`** — GM-editable by design in v1.
 - **Guest upgrade can fail** with `credential-already-in-use` if the Google/email account already belongs to another user. M1 must catch that Firebase error code and offer "sign in with that account instead" (the anonymous session's characters don't transfer in that edge case — warn before upgrade).
-- **Anonymous-account spam (3rd review's parting catch):** once hosted, anyone with the public URL can mint guest accounts and burn the 20k/day write quota — an *availability* problem, not a data leak. The fix is Firebase **App Check** (free tier); cheap to add at M6, annoying to retrofit after abuse. Decision **D8**: enable before deploy.
+- **Anonymous-account spam (3rd review's parting catch):** once hosted, anyone with the public URL can mint guest accounts and burn the 20k/day write quota — an *availability* problem, not a data leak. The fix is Firebase **App Check** (free tier); cheap to add at M6, annoying to retrofit after abuse. Decision **D8**: enable before deploy. Note (4th review): App Check must be in **enforce** mode — merely registering the app doesn't block unattributed traffic.
 
 **Security-review checklist (run on EVERY rules change — external review's ask):**
 1. Can a member act on someone **else's** document? Every write rule names the actor via the *existing* doc (`resource.data`), never `request.resource.data` alone.
@@ -336,6 +342,7 @@ service cloud.firestore {
 7. `users` list query **denied**; `users/{uid}` get by a signed-in user allowed.
 8. Characters subcollection query as a member **succeeds** (proves fixed-path `isMember()` works for subcollection lists); as a non-member **denied**.
 9. **arrayUnion self-join succeeds** and the new uid lands at the **end** of the list — proves the `old.concat([me])` ordering assumption (3rd review: keep it an explicit test rather than a semantics debate; if the emulator disagrees, switch to the explicit field-check fallback).
+10. **Removed member cannot delete their old character** — proves the delete rule's membership requirement (4th review, Codex's catch); a current owner and the GM still can.
 
 - Rules ship with the app and are treated like code: changes go through PR review (fits the friend-group workflow).
 - **Testing:** Firebase Emulator Suite locally. Rules tests via `@firebase/rules-unit-testing` are the goal; a manual pass in the emulator UI is the acceptable minimum when Java setup is painful on Windows (see USER_TODO note on Java).
@@ -391,7 +398,7 @@ Order rationale: every milestone is independently testable by running the app; t
 4. **Billing surprise.** Impossible-ish: Spark has no card on file. Worst case = quota pause, never a charge. Phone auth stays off (it's the one common auth method that requires Blaze).
 5. **AI-agent drift / outdated Firebase patterns.** Agents love writing deprecated v8-style code. *Mitigation:* pinned versions, CONTRIBUTING.md mandates modular v9+ imports and copying patterns from `src/lib` + existing features, this file fed to every agent session.
 6. **Multi-person drift.** Friends + agents converge badly without force. *Mitigation:* CONTRIBUTING.md from day one, service-layer convention, small PRs with required review (George's own plan — keep it).
-7. **Windows emulator friction.** The Emulator Suite needs Java (JDK). *Mitigation:* rules tests are "goal, not gate" — a manual emulator-UI pass is the acceptable minimum; JDK install is a documented USER_TODO option, not a hard requirement.
+7. **Windows emulator friction.** The Emulator Suite needs Java (JDK — now setup step 9). *Mitigation:* the §5 test set is a **GATE** for M2 and for every rules change — 4th review resolved this plan's own contradiction (an earlier draft of this risk said "goal, not gate", which was wrong: a broken rule fails silently, so agreement is not proof). A manual emulator-UI pass is the documented **fallback only if the JDK genuinely won't install**, and using the fallback must be recorded in DEVLOG when it happens.
 8. **Join-code leaks & guests.** 6 chars from a 32-char unambiguous alphabet ≈ 1B combinations, and the lookup collection is get-only (can't be enumerated) — but "authenticated" includes anonymous guests, so anyone with a *leaked* code plus a guest login gets in. The real risk is sharing, not guessing. *Mitigation:* codes travel only in the group chat, the GM sees the roster and can remove members, cap is rules-enforced — and **GM approval on join is now decision D5** (promoted from v1.1 by external review), not a maybe.
 9. **Chat abuse/size.** 500-char cap enforced in rules (not just UI); GM can delete; logs paginated.
 10. **Version drift between now and M0.** Numbers in §2 were verified today; the pins at M0 are the source of truth. If a major version lands mid-project, we don't chase it.
