@@ -182,7 +182,7 @@ Design notes:
 
 ## 5. Security rules approach
 
-Principles: **default deny, auth required for everything, campaign membership is the gate.** Sketch (finalized in `firestore.rules` and emulator-tested before each milestone ships). **This version applies the 2026-09-30 external security review — 6 bugs in the first sketch, all independently re-derived before fixing:**
+Principles: **default deny, auth required for everything, campaign membership is the gate.** Sketch (finalized in `firestore.rules` and emulator-tested before each milestone ships). **Two external review rounds applied, every claim re-derived before fixing:** round 1 (2026-09-30) — 6 bugs in the first sketch; round 2 (2026-10-01) — the campaign-*list* query was denied by the get()-based read rule ("rules are not filters", Grok's catch; Firebase docs confirmed), the GM update path was unconstrained, and `users` allowed profile enumeration. Round 2 also produced two *phantom* bugs (Gemini's "corrected" rules were line-for-line identical to ours — diffed and rejected): the discipline is 検証, verification beats consensus.
 
 ```js
 rules_version = '2';
@@ -191,6 +191,8 @@ service cloud.firestore {
 
     // ---- helpers, defined once (review bug 6) ----
     // Each get() is a BILLABLE Firestore read (cost note below this block).
+    // Used by SUBCOLLECTION rules only — the campaigns doc itself uses
+    // resource.data instead (query-safe; see the note on its read rule).
     function signedIn() { return request.auth != null; }
     function campaign(cid) {
       return get(/databases/$(database)/documents/campaigns/$(cid)).data;
@@ -203,7 +205,8 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if signedIn();                 // display-name lookups only
+      allow get: if signedIn();                  // display-name lookups, by uid only
+      allow list: if false;                      // no profile enumeration (2nd review)
       allow create, update: if request.auth.uid == uid;
       allow delete: if false;
     }
@@ -217,21 +220,42 @@ service cloud.firestore {
       // GM creates the code in the same batch as the campaign; getAfter()
       // sees the post-batch campaign and proves ownership:
       allow create: if signedIn()
+        && request.resource.data.campaignId is string
+        && request.resource.data.campaignId.size() > 0
         && getAfter(/databases/$(database)/documents/campaigns/$(request.resource.data.campaignId)).data.gmUid == request.auth.uid;
       allow update, delete: if false;            // codes immutable in v1 (rotate = new campaign)
     }
 
     match /campaigns/{cid} {
-      allow read: if isMember(cid);
+      // QUERY-SAFE read (2nd review, Grok's catch): rules are not filters — a
+      // list query is all-or-nothing and must be PROVABLE from its own where
+      // clauses, and a per-document get() can't be proven for an unknown result
+      // set. `uid in resource.data.memberUids` IS provable from
+      // where('memberUids','array-contains',uid) — the M2 campaign-list query.
+      // Subcollection rules below can keep get()-based isMember(): their parent
+      // path is fixed per query, so the get() is evaluated once, not per document.
+      allow read: if signedIn() && request.auth.uid in resource.data.memberUids;
       allow create: if signedIn()
         && request.resource.data.gmUid == request.auth.uid
         && request.resource.data.memberUids == [request.auth.uid]    // review bug 5: no pre-added members
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 100;
-      // Review bugs 3+4: the ONLY change a non-GM can make is appending their
-      // own uid, and the roster cap lives HERE, in the rule — not just app code.
-      allow update: if isGM(cid)
+      // GM branch (2nd review: was unconstrained — GM could rewrite gmUid,
+      // rotate joinCode, or push memberUids past the cap): gmUid/joinCode
+      // immutable, name validated, roster a sane list with the GM still in it.
+      // Uses resource.data (free) instead of isGM()'s billable get().
+      // Self-join branch unchanged (round-1 bugs 3+4).
+      allow update: if (signedIn()
+          && resource.data.gmUid == request.auth.uid
+          && request.resource.data.gmUid == resource.data.gmUid
+          && request.resource.data.joinCode == resource.data.joinCode
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 100
+          && request.resource.data.memberUids is list
+          && request.resource.data.memberUids.size() <= 8
+          && request.resource.data.gmUid in request.resource.data.memberUids)
         || (signedIn()
             && !(request.auth.uid in resource.data.memberUids)                       // not already a member
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids'])
@@ -283,13 +307,33 @@ service cloud.firestore {
 
 **Read cost of the helpers (verified against Firebase's pricing docs):** every `get()`/`exists()`/`getAfter()` in rules is **billed as a document read** — even when the rule *rejects* the request — with a hard cap of 10 document-access calls per single-document/query request (20 for batched writes). Our design needs at most 1 per operation (the campaign doc, deduplicated within a request; a party-view query pays +1 rules-read total). Comfortably inside the free tier — but counted, so helper `get()`s stay minimal and never grow per-document.
 
+**Known limits & trust model (written down per 2nd review — fine for a friend group, do not "fix" silently later):**
+- **Display names are client-supplied** (`rollerName`, `authorName`): a member could post a roll or chat message wearing someone else's name. Mitigated socially (small trusted group); real fix would be a `users` lookup join at render time.
+- **Dice are computed on the client** and the roll log is trust-based — nothing stops a modified client from posting a fake total. Server-side rolls need Cloud Functions = Blaze = out of scope by constraint.
+- **Timestamps aren't fully pinned:** `createdAt` should always be written with `serverTimestamp()`, but rules don't currently require it. Cheap hardening if wanted: `request.resource.data.createdAt == request.time`.
+- **The `joinCode` field on the campaign and the `joinCodes/{code}` doc are kept in sync by the app, not the rules** (rules can't compare two docs against each other on write without extra get()s; the code doc is the one the join flow reads).
+- **Character create lets the GM set any `ownerUid`** — deliberate: that's how the GM pre-creates a sheet for a player or an NPC. Players can only create sheets they own.
+- **The GM branch of the campaign update rule doesn't lock `setting`/`system`/`createdAt`** — GM-editable by design in v1.
+- **Guest upgrade can fail** with `credential-already-in-use` if the Google/email account already belongs to another user. M1 must catch that Firebase error code and offer "sign in with that account instead" (the anonymous session's characters don't transfer in that edge case — warn before upgrade).
+
 **Security-review checklist (run on EVERY rules change — external review's ask):**
 1. Can a member act on someone **else's** document? Every write rule names the actor via the *existing* doc (`resource.data`), never `request.resource.data` alone.
-2. Can a write smuggle in a field change it shouldn't? (Self-join = `old.concat([me])` + `hasOnly(['memberUids'])`; ownership immutable.)
+2. Can a write smuggle in a field change it shouldn't? (Self-join = `old.concat([me])` + `hasOnly(['memberUids'])`; ownership immutable; GM branch locks `gmUid`/`joinCode`.)
 3. Is every limit enforced **in the rules** (cap ≤ 8, text ≤ 500, notation ≤ 50), not just app code?
-4. Is anything listable that shouldn't be? (`joinCodes` is get-only.)
+4. Is anything listable that shouldn't be? (`joinCodes` get-only; `users` get-only.)
 5. Does the change stay within the 10-document-access-call budget per request?
-6. Emulator tests pass before merge — rules changes are PR-reviewed like code.
+6. **Is every `list` rule provable from query constraints?** Rules are not filters — a collection query fails wholesale if the rule can't be guaranteed for its potential result set. Collection-level rules use `resource.data`; per-document `get()` only where the parent path is fixed (subcollections).
+7. Emulator tests pass before merge — rules changes are PR-reviewed like code.
+
+**M2 emulator test set (must pass before M2 ships — from 2nd review):**
+1. Member's campaign-list query (`where('memberUids','array-contains',uid)`) **succeeds** — proves the query-safe read rule.
+2. Non-member (or signed-out) campaign list **denied**.
+3. 9th join **denied** by the size check.
+4. Joiner adding or removing *other* uids in the join write **denied** by the concat check.
+5. Sheet hijack (member rewriting someone's `ownerUid`) **denied**.
+6. GM changing `gmUid` or `joinCode` **denied**; GM removing a member **allowed**.
+7. `users` list query **denied**; `users/{uid}` get by a signed-in user allowed.
+8. Characters subcollection query as a member **succeeds** (proves fixed-path `isMember()` works for subcollection lists); as a non-member **denied**.
 
 - Rules ship with the app and are treated like code: changes go through PR review (fits the friend-group workflow).
 - **Testing:** Firebase Emulator Suite locally. Rules tests via `@firebase/rules-unit-testing` are the goal; a manual pass in the emulator UI is the acceptable minimum when Java setup is painful on Windows (see USER_TODO note on Java).
@@ -317,7 +361,7 @@ The Firebase **web** API key in `.env` is a public identifier by design, not a s
 |---|---|---|
 | **M0** | Scaffold & conventions: React+Vite (+TypeScript unless the group votes otherwise on D2), Tailwind (D3 resolved), Firebase lib wired to `.env`, rules file stub, `CONTRIBUTING.md`, `contributions/` scaffold, pinned deps, `.gitignore` with `.env` | `npm run dev` shows a styled placeholder home page; `npm run build` passes; `.env.example` documents every variable; **no features** |
 | **M1** | Auth & profile: email/password register+login+logout, anonymous guest, `users/{uid}` profile doc. Built in that order — email/password defines the profile flow, then **Google sign-in is layered into the same milestone** (in Firebase it's ~20 extra lines on identical plumbing, not new architecture). Guests get an **in-app upgrade path** (`linkWithCredential`): same uid, their characters follow | Register → set display name → stay logged in after refresh; guest works; guest upgrades to a full account and keeps their sheets; Google login lands in the same profile flow; logged-out users see only auth screens; profile doc visible in Firebase console |
-| **M2** | Campaigns: create (become GM, joinCode doc created in the same batch), join via 6-char code (`joinCodes` lookup → server-side `arrayUnion` — no client read of the campaign first), campaign list, roster | In two browsers: A creates, B joins with code, both see the roster; B sees the campaign in their list; wrong code fails cleanly; a 9th member is denied by the rules; B's join write cannot add or remove anyone else (emulator-checked) |
+| **M2** | Campaigns: create (become GM, joinCode doc created in the same batch), join via 6-char code (`joinCodes` lookup → server-side `arrayUnion` — no client read of the campaign first), campaign list (query: `where('memberUids','array-contains',uid)` — the read rule is written to be provable from exactly that constraint), roster | In two browsers: A creates, B joins with code, both see the roster; B's campaign-list query returns the campaign; wrong code fails cleanly; a 9th member is denied by the rules; B's join write cannot add or remove anyone else; the §5 emulator test set passes |
 | **M3** | Character sheets: create/edit 5e-lite sheet, derived stats computed & tested, GM edits any sheet, others read-only, live sync | A edits HP → B sees it change within ~1s with no refresh; invalid input (level 0, HP letters) rejected; derived modifiers correct (unit tests) |
 | **M4** | Dice roller + roll log: parser (`XdY+/-Z`, adv/dis on d20), roll buttons on sheet + free-form box, results append for everyone | A rolls `2d6+3` with advantage → B sees result with breakdown live; parser unit tests pass; log survives refresh |
 | **M5** | Table chat: messages pane, live send/receive, GM delete | Two-way live messaging in two browsers; history persists; GM can delete; >500 chars rejected |
@@ -340,7 +384,7 @@ Order rationale: every milestone is independently testable by running the app; t
 ## 9. Risks & mitigations
 
 1. **Firestore free-tier quota.** ~50K reads/day is generous for a friend table (§6 math), but runaway listeners are the classic footgun. *Mitigation:* scoped listeners with teardown, log pagination (newest 100 + load-more), quota visible in the Firebase console usage tab, all data kept tiny.
-2. **Rules bugs = exposed or broken data** — the #1 real risk of a rules-first app, and not theoretical: the first sketch had 6 (external review, 2026-09-30 — including a join flow our own rules would have denied, and a sheet-hijack via incoming-`ownerUid`). *Mitigation:* the §5 security-review checklist runs on every rules change, emulator tests before every milestone ships, rules changes require PR review like code.
+2. **Rules bugs = exposed or broken data** — the #1 real risk of a rules-first app, and not theoretical: round 1 (2026-09-30) found 6, including a join flow our own rules would have denied and a sheet-hijack via incoming-`ownerUid`; round 2 (2026-10-01) found the campaign-list query hole ("rules are not filters") and an unconstrained GM update — and also produced 2 phantom bugs, which is why every claim gets re-derived before patching. *Mitigation:* the §5 security-review checklist runs on every rules change, the §5 emulator test set gates M2, rules changes require PR review like code.
 3. **Concurrent sheet edits (LWW).** Two people editing one sheet at once can silently clobber. *Mitigation:* single-owner editing in v1; GM edits rare; `updatedBy/updatedAt` surfaced. Real-time multi-editor locking is a documented v2 problem.
 4. **Billing surprise.** Impossible-ish: Spark has no card on file. Worst case = quota pause, never a charge. Phone auth stays off (it's the one common auth method that requires Blaze).
 5. **AI-agent drift / outdated Firebase patterns.** Agents love writing deprecated v8-style code. *Mitigation:* pinned versions, CONTRIBUTING.md mandates modular v9+ imports and copying patterns from `src/lib` + existing features, this file fed to every agent session.
@@ -368,6 +412,8 @@ Order rationale: every milestone is independently testable by running the app; t
 | Append-only roll log | Editable rolls | Kills conflicts by construction and matches how tables actually use logs |
 | `joinCodes` lookup collection (get-only) | Querying campaigns by joinCode; Cloud Function joins | Our own member-only read rule denied the old lookup (external-review bug 1); Cloud Functions need Blaze = paid, excluded by constraint |
 | Ownership checked on the existing doc, immutable | Checking incoming `ownerUid` on update | The incoming-data check let any member hijack any sheet by rewriting the field (external-review bug 2) |
+| Campaign-list rule provable from query constraints (`resource.data`) | `isMember()`'s get() on the campaigns doc | Rules are not filters: a collection query must be guaranteed by its own `where` clauses; per-document get() can't be, so B's campaign list would have failed (2nd review — Grok, docs-confirmed) |
+| GM update field locks | `allow update: if isGM(cid)` with no constraints | Unconstrained GM could rewrite `gmUid`, rotate `joinCode`, or push the roster past the cap (2nd review) |
 
 Open items (decisions D1–D4, questions Q1–Q4) live in `USER_TODO.md`.
 

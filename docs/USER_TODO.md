@@ -5,6 +5,8 @@ Every item says **what** it is, **why** it's needed, and **which milestone it bl
 > **Status after George's 2026-09-30 review:** Q2/Q3 confirmed, D1/D3/D4 resolved, Q1/Q4/D2 deliberately open pending his research and the group review. Firebase setup (steps 2–7) waits for friend feedback — that's fine, nothing else is time-sensitive.
 >
 > **Revision 2 (same day, external AI review applied):** 6 security-rules bugs fixed in PLAN §5 (join flow redesigned via `joinCodes`, sheet-hijack hole closed, cap rules-enforced), decisions **D5/D6 added**, `docs/RESEARCH.md` created, "locked" labels softened to draft/proposed. Send the updated PLAN.md back to Claude for the rules re-check.
+>
+> **Revision 3 (2026-10-01, 2nd external review round):** Gemini's two "critical bugs" verified **phantom** (its "corrected" rules were line-for-line identical to ours — diffed, rejected). Grok's real bug fixed: the campaign-*list* query would have been denied by the get()-based read rule ("rules are not filters" — Firebase docs confirmed). Also: GM update locked, `users` get-only, `joinCodes` type check, a **known-limits & trust-model** section and an **8-case emulator test set** added to PLAN §5. Push still pending George's explicit word.
 
 ---
 
@@ -63,4 +65,4 @@ The review set is: **`PLAN.md`** (the whole architecture), **`DEVLOG.md`** (what
 
 - **Spark plan can't charge you.** No card on file = worst case is quotas pausing until midnight Pacific. PLAN.md §6 shows a table session uses a small fraction of the daily quota.
 - **Self-reported logs vs reality:** claims in `DEVLOG.md` are checkable via `git log` / `git diff` — the devlog explains, git verifies.
-- **What happens next:** the plan is now review-ready for your coursemates. When you (and they) are ready: Firebase steps 2–7, D2 verdict from the group, then the go-ahead — I start **M0 only**, stop, and you test.
+- **What happens next:** relay the updated PLAN §5 to Claude for the re-check. Push decision is yours (`git push origin main` — 4 local commits, docs-only, or tell me to). Then: group votes D2/D5/D6 → Firebase steps 2–7 → the go-ahead, and I start **M0 only**, stop, and you test.

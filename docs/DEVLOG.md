@@ -103,3 +103,27 @@
 **Not tested / not verified:** rules remain a **sketch** — they get proven in the emulator at M1/M2. One thing flagged to watch: the `diff()` + `arrayUnion` interaction in the self-join rule; if the emulator disagrees, the fallback is explicit field-equality checks. No app code exists, so nothing else is testable yet.
 
 **Next (George):** relay updated PLAN §4–§5 to Claude for the re-check → group votes D2/D5/D6 → Firebase steps 2–7 → go-ahead.
+
+---
+
+## Phase 1 — revision 3: second external review round (2026-10-01)
+
+**Goal:** apply round 2 of George's multi-model review (Claude relaying; Grok's find center-stage). Still docs-only, no app code.
+
+**Verification first:**
+- **Gemini's two "critical bugs" — rejected as phantom.** Its "corrected production-ready" rules were compared against our §5: line-for-line identical (modulo comments). Bug A misread `getAfter()` (the campaign create rule never calls `isMember()`, and getAfter exists precisely for batch writes); Bug B misread the concat check (duplicates/odd ordering are denied *on purpose*; `arrayUnion` appends, matching `old.concat([me])`). Grok Bot's assessment was correct — recorded as the project's first phantom-bug incident.
+- **Grok's Bug A — confirmed real, docs-checked.** Rules are not filters: a `list` query is all-or-nothing and must be provable from its own `where` clauses; the get()-based `isMember(cid)` read rule can't be proven for a collection query, so B's campaign list (`where('memberUids','array-contains',uid)`) would have failed with permission denied even with correct membership. Verified against firebase.google.com rules-query docs before patching. Key distinction preserved: subcollection rules keep get()-based `isMember()` because the parent path is fixed per query (get evaluated once); the campaigns *collection* rule uses `resource.data` (provable, and saves a billable get()).
+
+**Fixes applied to §5:** query-safe campaign read (`signedIn() && request.auth.uid in resource.data.memberUids`); GM update branch locked (gmUid/joinCode immutable, name validated, `memberUids is list` ≤ 8, GM stays in roster; uses `resource.data.gmUid` instead of `isGM()`'s get()); `users` split to get-only/list-denied; `joinCodes` create requires `campaignId is string` (non-empty). New subsections: **Known limits & trust model** (client-supplied display names, client-computed dice, unpinned timestamps + optional `request.time` hardening, joinCode sync app-enforced, GM-set ownerUid on create is a feature, GM branch leaves setting/system/createdAt unlocked, guest-upgrade `credential-already-in-use` error path for M1) and the **8-case M2 emulator test set**; checklist grew item 6 (list-rule provability). §7 M2 acceptance now names the exact list query and requires the test set; §9 risk 2 records both rounds + the phantom-bug incident; §10 gained two decision rows.
+
+**Git:** review again says push, paste-ready prompt again says "commit locally, do not push" — holding the standing rule: committed locally, push on George's explicit word. (README "modified" reports refer to the zip copy; the actual tree is clean and the heading was already fixed in `22911e3`.)
+
+**Files modified:** `PLAN.md` (§5 intro + helpers comment + users + joinCodes + campaigns read/update + known-limits + checklist + test set; §7 M2; §9 risk 2; §10 +2 rows), `USER_TODO.md` (revision header, next-steps), this entry.
+
+**Commands run:** web search ×1 (rules-are-not-filters doc behavior); git status checks.
+
+**Errors:** none.
+
+**Not tested / not verified:** all rules remain a sketch — the 8-case emulator set exists precisely to convert claims into proofs at M2. The subcollection-query claim (fixed-path get() works for list) is test case 8.
+
+**Next (George):** Claude's re-check of the patched blocks → push decision → group votes D2/D5/D6 → Firebase steps 2–7 → go-ahead.
