@@ -180,3 +180,20 @@
 **Not tested / not verified:** the rules remain a sketch — that's now written into §5 itself. The 10-case emulator set is the gate that converts review agreement into verification at M2.
 
 **Next (George):** push decision (split verdict, your word) → optional one-page decisions summary from Claude for the WhatsApp pitch → group votes D2/D5/D6/D7/D8 → Firebase + JDK setup → go-ahead → M0 only.
+
+---
+
+## Phase 1 — revision 6: line-number catch + votes file (2026-10-01)
+
+**Goal:** apply the round-5 fixes — Codex found one live doc inconsistency, and Claude's WhatsApp vote summary became a repo file.
+
+- **"9-case" → "10-case" (Codex's catch, Claude confirmed it's a live instruction):** `USER_TODO.md` §C step 9 (the JDK install step) still said the M2 gate was "the 9-case rules test set" after round 4 grew the set to 10. Fixed. Grep sweep across all docs for other live "9-case"/"9 cases" references: the only other hit is the revision-4 history note in USER_TODO, which stays — it's a record of what was true at that round, and DEVLOG (append-only) historical mentions stay by definition.
+- **`docs/GROUP-VOTES.md` created:** Claude's plain-language WhatsApp summary of the five open decisions (D2/D5/D6/D7/D8, recommendation per item) saved into the repo so it travels with the context pack instead of living in chat. Text kept verbatim; added a usage footer — votes get recorded in `USER_TODO.md` §B, the doc of record. This answers Grok Bot's "want me to draft it or ask Claude?" — Claude had already delivered it.
+
+**Files modified:** `USER_TODO.md` (one live line), `GROUP-VOTES.md` (new), this entry.
+
+**Commands run:** grep sweep for stale "9-case" references.
+
+**Errors:** none. **Not tested / not verified:** nothing to test — docs-only; the rules remain UNVERIFIED until the M2 emulator gate.
+
+**Push:** still held — reviewers remain split and no explicit word from George.

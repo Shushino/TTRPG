@@ -56,7 +56,7 @@ Two findings from George's terminal test:
 7. **Fill in `.env`** — at M0 I'll create `.env.example` with exactly: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`; you paste the step-4 values. (They're public identifiers, not secrets — see PLAN.md §5 — kept out of git anyway.) *Blocks: M1.*
 
 8. **(Only at M6)** Firebase CLI for deploy: `npm install -g firebase-tools` → `firebase login`. *Blocks: M6.*
-9. **(Optional, recommended before M2)** Install a JDK (17+, e.g. Eclipse Temurin from https://adoptium.net) — the Firebase Emulator Suite needs Java, and the M2 milestone is gated on running the 9-case rules test set locally. Installing it now, with the rest of setup, avoids discovering the dependency mid-milestone (3rd review's point). *Blocks: M2 test set.*
+9. **(Optional, recommended before M2)** Install a JDK (17+, e.g. Eclipse Temurin from https://adoptium.net) — the Firebase Emulator Suite needs Java, and the M2 milestone is gated on running the 10-case rules test set locally. Installing it now, with the rest of setup, avoids discovering the dependency mid-milestone (3rd review's point). *Blocks: M2 test set.*
 
 ## D. Pitch pack — what to send friends / other AI models
 
